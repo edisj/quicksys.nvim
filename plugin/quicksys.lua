@@ -1,0 +1,3 @@
+vim.print("LOADING PLUGIN")
+
+
