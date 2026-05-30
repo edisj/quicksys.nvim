@@ -1,8 +1,12 @@
 # Quicksys = vim.system + quickfix
-A pretty output window, a pretty quickfix list, and a (also pretty?) command runner bundled together so that you can enhance the "edit -> compile -> edit" workflow, control exactly how the quickfix list is populated and formatted on a case-by-case basis, and much more...
+**quicksys.nvim** is a bundled: 
+- pretty output window
+- pretty quickfix list
+- (also pretty?) command runner
 
-TODO: image + description here
+It aims to enhance the "edit -> compile -> edit" workflow and allow you to control exactly how the quickfix list is populated and formatted on a case-by-case basis.
 
+TODO: image here
 
 ## Why?
 what problem does it solve? motivate with intended workflow
