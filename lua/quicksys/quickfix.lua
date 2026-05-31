@@ -1,6 +1,3 @@
-local fn = vim.fn
-local api = vim.api
-
 local config = require("quicksys.config")
 
 local M = {}
@@ -20,8 +17,8 @@ local M = {}
 ---
 --- @return integer buf
 local function _find_or_create_qf_buffer()
-  for _, buf in ipairs(api.nvim_list_bufs()) do
-    if vim.bo[buf].filetype == "qf" and api.nvim_buf_get_name(buf):match("^[Quickfix List]$") then
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.bo[buf].filetype == "qf" and vim.api.nvim_buf_get_name(buf):match("^[Quickfix List]$") then
       return buf
     end
   end
@@ -32,7 +29,7 @@ local function _find_or_create_qf_buffer()
   local buf
   vim._with({ noautocmd = true }, function()
     vim.cmd("copen")
-    buf = api.nvim_get_current_buf()
+    buf = vim.api.nvim_get_current_buf()
     vim.cmd("cclose")
   end)
 
@@ -52,11 +49,11 @@ local function win()
 end
 
 function M.is_qf_open()
-  return fn.getqflist({ winid = 0 }).winid ~= 0
+  return vim.fn.getqflist({ winid = 0 }).winid ~= 0
 end
 
 function M.length()
-  return #fn.getqflist()
+  return #vim.fn.getqflist()
 end
 
 function M.open(override_opts)
@@ -88,37 +85,40 @@ end
 
 function M.next(opts)
   if M.length() == 0 then return end
-  local idx = fn.getqflist({ idx = 0 }).idx
+  local idx = vim.fn.getqflist({ idx = 0 }).idx
   if M.length() == idx then
     vim.cmd.clast()
   else
     vim.cmd.cnext()
   end
-  if opts.on_select then opts.on_select() end
 end
 
 function M.prev(opts)
   if M.length() == 0 then return end
-  local idx = fn.getqflist({ idx = 0 }).idx
+  local idx = vim.fn.getqflist({ idx = 0 }).idx
   if idx == 1 then
     return vim.cmd.cfirst()
   end
   pcall(vim.cmd.cprev)
 end
 
+---@param ctx quicksys.ContextObj
+---@param data any
+---@param action " " | "a" | "r" | "u"
 local function _setqflist(ctx, data, action)
   local source = require("quicksys").sources[ctx.__source]
   local handler = source.handler
   local items = handler(data)
-  -- if #(items or {}) == 0 then return end
   local qftf = source.qftf
+  local qf_title = vim.fn.getqflist{title=true}.title
   -- IMPORTANT: if I don't wrap this with noautocmd, editor goes into
   -- infinite recursive hell of resetting the quickfix list...
   -- should investigate with debugger
   vim._with({ noautocmd = true }, function()
-    fn.setqflist({}, action, {
+    vim.fn.setqflist({}, action, {
       items = items,
       context = ctx,
+      title = qf_title == ":setqflist()" and tostring(source) or qf_title,
       quickfixtextfunc = qftf,
     })
   end)
