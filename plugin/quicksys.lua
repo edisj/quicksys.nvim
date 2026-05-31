@@ -1,3 +1,1 @@
-vim.print("LOADING PLUGIN")
-
-
+require("quicksys")

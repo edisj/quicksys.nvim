@@ -6,15 +6,15 @@
 ---@field end_idx integer index of last entry for which text should be returned
 
 ---@class QuickFixSource
+---@field name? string
 ---@field handler fun(data: any): vim.quickfix.entry[]
 ---@field qftf? fun(info: QuickFixTextFuncInfo): string[]
----@field syntax? fun(): nil
 
-return {
-  builtin = {
-    nested = require("quicksys.sources.nested"),
-    flat = require("quicksys.sources.flat"),
-    javac = require("quicksys.sources.javac"),
-    gcc = require("quicksys.sources.gcc"),
-  }
-}
+---@type table<string, QuickFixSource>
+return setmetatable({}, {
+  __index = function(_, k)
+    local modname = "quicksys.builtin.sources." .. k
+    local ok, mod = pcall(require, modname)
+    if ok then return mod end
+  end
+})

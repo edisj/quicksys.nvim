@@ -19,19 +19,23 @@ return {
     for _, item in ipairs(items) do
       local full_name = vim.api.nvim_buf_get_name(item.bufnr)
       local rel_name = vim.fn.fnamemodify(full_name, ":~:.")
-      local len = #rel_name + #tostring(item.lnum) + (item.col ~= 0 and #tostring(item.col) or 0)
+      local len = #rel_name + #tostring(item.lnum) + #tostring(item.col) + 2
       max_len = math.max(len, max_len)
     end
+
     local lines = vim
       .iter(ipairs(items))
       :map(function(_, item)
         local name = vim.api.nvim_buf_get_name(item.bufnr)
         local rel_name = vim.fn.fnamemodify(name, ":~:.")
-        return (item.col ~= 0 and "%s:%s:%s %s" or "%s:%s %s" ):format(
+        local pad_len = max_len - #rel_name - #tostring(item.lnum) - #tostring(item.col) - 2
+        local pad = string.rep(" ", pad_len)
+        return ("%s:%s:%s%s %s"):format(
           rel_name,
           item.lnum,
-          item.col ~= 0 and item.col,
-          item.text
+          item.col,
+          pad,
+          vim.trim(item.text)
         )
       end)
       :totable()
@@ -41,26 +45,31 @@ return {
       vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
       vim.api.nvim_buf_call(buf, function() vim.cmd("syntax clear") end)
 
-      local extmark = function(i, opts) vim.api.nvim_buf_set_extmark(buf, ns, i-1, 0, opts) end
-      for i = 1, #lines do
-        local item = items[i]
-        local line = lines[i]
-        -- if item.valid == 1 then
-          local icon = require("ui.icons").diagnostics[constants.CHAR_TO_SEVERITY[item.type]] or ""
-          local hl = type_to_hl[item.type]
-          extmark(i, {
-            virt_text = { { icon .. " ", hl } },
-            virt_text_pos = "inline",
-          })
-        -- end
+      local extmark = function(i, col, opts)
+        vim.api.nvim_buf_set_extmark(buf, ns, i-1, col, opts)
+      end
+      for i, item in ipairs(items) do
+        local icon, hl
+        icon = require("ui.icons").diagnostics[constants.CHAR_TO_SEVERITY[item.type]] or ""
+        if icon == "" then
+          local file = vim.api.nvim_buf_get_name(item.bufnr)
+          icon, hl = require("mini.icons").get("extension", vim.fn.fnamemodify(file, ":e"))
+        else
+          hl = type_to_hl[item.type]
+        end
+        extmark(i, 0, {
+          virt_text = { { icon .. " ", hl } },
+          virt_text_pos = "inline",
+        })
+        local name = vim.api.nvim_buf_get_name(item.bufnr)
+        local rel_name = vim.fn.fnamemodify(name, ":~:.")
+        extmark(i, 0, { hl_group = "Keyword", end_col = #rel_name })
+        extmark(i, #rel_name, { hl_group = "Number", end_col = #rel_name + #tostring(item.lnum) + #tostring(item.col) + 2 })
       end
 
     end)
 
-    -- NOTE: this must be scheduled because the quickfix buffer text
-    -- isn't set until this function returns
     set_extmarks(list.qfbufnr)
-
     return lines
   end,
 }

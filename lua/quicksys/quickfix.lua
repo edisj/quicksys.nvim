@@ -1,6 +1,8 @@
 local fn = vim.fn
 local api = vim.api
 
+local config = require("quicksys.config")
+
 local M = {}
 
 --- This function exists because you need to be very careful with how
@@ -37,34 +39,16 @@ local function _find_or_create_qf_buffer()
   return buf
 end
 
-local _qf_win = nil
-function M.win()
-  if _qf_win then return _qf_win end
+local _win = nil
+local function win()
+  if _win then return _win end
 
-  local win_opts = {
-    relative = "minibuffer",
-    position = "bot",
-    style = "minimal",
-    enter = true,
-    bufnr = _find_or_create_qf_buffer,
-    keymaps = {
-      { "n", "q", function(self) self:close() end },
-    },
-    title = function()
-      local text = vim.fn.getqflist({ title = true }).title
-      return text == "" and " quickfix " or (" %s "):format(vim.trim(text))
-    end,
-    title_pos = "left",
-    wo = {
-      winfixbuf = true,
-      cursorline = false,
-      number = false,
-      scrolloff = 2,
-    },
-  }
-
-  _qf_win = Win.float(win_opts)
-  return _qf_win
+  local qf_config = config.windows.quickfix
+  local win_opts = qf_config.win_opts
+  win_opts.bufnr = _find_or_create_qf_buffer
+  local kind = qf_config.kind
+  _win = require("win")[kind](win_opts)
+  return _win
 end
 
 function M.is_qf_open()
@@ -76,17 +60,16 @@ function M.length()
 end
 
 function M.open(override_opts)
-  if M.win():is_open() then return end
+  if win():is_open() then return end
   local idx = math.max(vim.fn.getqflist({ idx = 0 }).idx, 1)
-  return M
-    .win()
+  return win()
     :open(override_opts)
     :set_cursor(idx, 0)
     .winid
 end
 
 function M.close()
-  return M.win():is_open() and M.win():close() or M.is_qf_open() and vim.cmd.cclose()
+  return win():is_open() and win():close() or M.is_qf_open() and vim.cmd.cclose()
 end
 
 function M.toggle(override_opts)
@@ -94,25 +77,27 @@ function M.toggle(override_opts)
 end
 
 function M.smart_toggle(override_opts)
-  if M.win():is_focused() then
+  if win():is_focused() then
     M.close()
   elseif M.win():is_open() then
-    M.win():focus()
+    win():focus()
   else
     M.open(override_opts)
   end
 end
 
-function M.next()
+function M.next(opts)
   if M.length() == 0 then return end
   local idx = fn.getqflist({ idx = 0 }).idx
   if M.length() == idx then
-    return vim.cmd.clast()
+    vim.cmd.clast()
+  else
+    vim.cmd.cnext()
   end
-  pcall(vim.cmd.cnext)
+  if opts.on_select then opts.on_select() end
 end
 
-function M.prev()
+function M.prev(opts)
   if M.length() == 0 then return end
   local idx = fn.getqflist({ idx = 0 }).idx
   if idx == 1 then
@@ -121,11 +106,11 @@ function M.prev()
   pcall(vim.cmd.cprev)
 end
 
-local function setqflist(ctx, data, action)
+local function _setqflist(ctx, data, action)
   local source = require("quicksys").sources[ctx.__source]
   local handler = source.handler
   local items = handler(data)
-  if #(items or {}) == 0 then return end
+  -- if #(items or {}) == 0 then return end
   local qftf = source.qftf
   -- IMPORTANT: if I don't wrap this with noautocmd, editor goes into
   -- infinite recursive hell of resetting the quickfix list...
@@ -136,14 +121,11 @@ local function setqflist(ctx, data, action)
       context = ctx,
       quickfixtextfunc = qftf,
     })
-    -- local ns = vim.api.nvim_create_namespace("quicksys-qftf")
-    -- local buf = fn.getqflist({ qfbufnr = true }).qfbufnr
-    -- vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   end)
 end
-function M.set(ctx, data)     setqflist(ctx, data, " ") end
-function M.append(ctx, data)  setqflist(ctx, data, "a") end
-function M.replace(ctx, data) setqflist(ctx, data, "r") end
-function M.update(ctx, data)  setqflist(ctx, data, "u") end
+function M.set(ctx, data)     _setqflist(ctx, data, " ") end
+function M.append(ctx, data)  _setqflist(ctx, data, "a") end
+function M.replace(ctx, data) _setqflist(ctx, data, "r") end
+function M.update(ctx, data)  _setqflist(ctx, data, "u") end
 
 return M
