@@ -15,4 +15,13 @@ M.CHAR_TO_SEVERITY = vim
     return acc
   end)
 
+
+M.QF_TYPE_TO_HL = {
+  E = "DiagnosticError",
+  W = "DiagnosticWarn",
+  I = "DiagnosticInfo",
+  H = "DiagnosticHint",
+  N = "DiagnosticHint",
+}
+
 return M

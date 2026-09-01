@@ -1,4 +1,3 @@
-local config = require("quicksys.config")
 
 local M = {}
 
@@ -36,57 +35,21 @@ local function _find_or_create_qf_buffer()
   return buf
 end
 
-local _win = nil
-local function win()
-  if _win then return _win end
-
-  local qf_config = config.windows.quickfix
-  local win_opts = qf_config.win_opts
-  win_opts.bufnr = _find_or_create_qf_buffer
-  local kind = qf_config.kind
-  _win = require("win")[kind](win_opts)
-  return _win
-end
-
-function M.is_qf_open()
+function M.is_open()
   return vim.fn.getqflist({ winid = 0 }).winid ~= 0
 end
 
-function M.length()
+local function idx()
+  return math.max(vim.fn.getqflist({ idx = 0 }).idx, 1)
+end
+
+local function len()
   return #vim.fn.getqflist()
 end
 
-function M.open(override_opts)
-  if win():is_open() then return end
-  local idx = math.max(vim.fn.getqflist({ idx = 0 }).idx, 1)
-  return win()
-    :open(override_opts)
-    :set_cursor(idx, 0)
-    .winid
-end
-
-function M.close()
-  return win():is_open() and win():close() or M.is_qf_open() and vim.cmd.cclose()
-end
-
-function M.toggle(override_opts)
-  return M.is_qf_open() and M.close() or M.open(override_opts)
-end
-
-function M.smart_toggle(override_opts)
-  if win():is_focused() then
-    M.close()
-  elseif M.win():is_open() then
-    win():focus()
-  else
-    M.open(override_opts)
-  end
-end
-
 function M.next(opts)
-  if M.length() == 0 then return end
-  local idx = vim.fn.getqflist({ idx = 0 }).idx
-  if M.length() == idx then
+  if len() == 0 then return end
+  if len() == idx() then
     vim.cmd.clast()
   else
     vim.cmd.cnext()
@@ -94,9 +57,8 @@ function M.next(opts)
 end
 
 function M.prev(opts)
-  if M.length() == 0 then return end
-  local idx = vim.fn.getqflist({ idx = 0 }).idx
-  if idx == 1 then
+  if len() == 0 then return end
+  if idx() == 1 then
     return vim.cmd.cfirst()
   end
   pcall(vim.cmd.cprev)
@@ -106,6 +68,7 @@ end
 ---@param data any
 ---@param action " " | "a" | "r" | "u"
 local function _setqflist(ctx, data, action)
+  ctx.__source = ctx.source or ctx.__source or ctx.__cmd and ctx.__cmd[1]
   local source = require("quicksys").sources[ctx.__source]
   local handler = source.handler
   local items = handler(data)
@@ -118,7 +81,7 @@ local function _setqflist(ctx, data, action)
     vim.fn.setqflist({}, action, {
       items = items,
       context = ctx,
-      title = qf_title == ":setqflist()" and tostring(source) or qf_title,
+      title = qf_title == ":setqflist()" and tostring(source.name) or qf_title,
       quickfixtextfunc = qftf,
     })
   end)
