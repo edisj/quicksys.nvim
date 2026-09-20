@@ -1,11 +1,9 @@
 local M = {}
 
 ---
----@param ctx quicksys.ContextObj
 ---@param ... string
----@return vim.SystemObj?
-function M.system(ctx, ...)
-  return require("quicksys.system").system(ctx, ...)
+function M.system(...)
+  return require("quicksys.system").system(...)
 end
 
 ---@param win_opts? table

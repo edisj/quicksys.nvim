@@ -2,10 +2,45 @@ local constants = require("quicksys.constants")
 
 local M = {}
 
----@return boolean
-function M.has_win_dependency()
-  local ok, _ = pcall(require, "win")
-  return ok
+M.scheduled_echo = vim.schedule_wrap(function(ctx, chunks)
+  if ctx.__msgchunks == nil then ctx.__msgchunks = {} end
+  vim.list_extend(ctx.__msgchunks, chunks)
+  ctx.__msgid = vim.api.nvim_echo(ctx.__msgchunks, false, { id = ctx.__msgid })
+end)
+
+M.chunks_to_lines = function(chunks, start)
+  local lines, extmarks = {}, {}
+  local start_col = 0
+  local offset = start or 0
+  local i = 1
+  local add_extmark = function(scol, ecol, hl)
+    extmarks[#extmarks + 1] = {
+      row = i - 1 + offset,
+      start_col = scol,
+      end_col = ecol,
+      hl_group = hl,
+    }
+  end
+
+  for _, chunk in ipairs(chunks) do
+    local text, hl = chunk[1], chunk[2]
+    local lines_in_chunk = vim.split(text, "\n")
+    -- local lines_in_chunk = text == "\n" and { "" } or vim.split(text, "\n")
+    local text_before_newline = lines_in_chunk[1]
+    lines[i] = (lines[i] or "") .. text_before_newline
+    if hl ~= nil then add_extmark(start_col, start_col + #text_before_newline, hl) end
+    start_col = start_col + #text_before_newline
+    for j = 2, #lines_in_chunk do
+      i = i + 1
+      start_col = 0
+      local line = lines_in_chunk[j]
+      lines[i] = (lines[i] or "") .. line
+      if hl ~= nil then add_extmark(start_col, start_col + #line, hl) end
+      start_col = start_col + #line
+    end
+  end
+
+  return lines, extmarks
 end
 
 function M.warn(msg)

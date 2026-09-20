@@ -24,5 +24,5 @@ return {
 
     return list
   end,
-  qftf = require("quicksys.utils").gen_nested_qftf()
+  qftf = require("quicksys.util").gen_nested_qftf()
 }

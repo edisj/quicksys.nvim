@@ -7,6 +7,39 @@ vim.api.nvim_create_user_command("System", function(args)
     require("quicksys").system(unpack(cmds))
   end, { desc = "TODO: system description", nargs = "+", complete = "file" })
 
+local function create_terminal_hls()
+  for i, color in ipairs {
+    "QuicksysBlack",
+    "QuicksysRed",
+    "QuicksysGreen",
+    "QuicksysYellow",
+    "QuicksysBlue",
+    "QuicksysMagenta",
+    "QuicksysCyan",
+    "QuicksysWhite",
+    "QuicksysBrightBlack",
+    "QuicksysBrightRed",
+    "QuicksysBrightGreen",
+    "QuicksysBrightYellow",
+    "QuicksysBrightBlue",
+    "QuicksysBrightMagenta",
+    "QuicksysBrightCyan",
+    "QuicksysBrightWhite",
+  } do
+    local fg = vim.g["terminal_color_" .. (i - 1)]
+    local ctermfg
+    if fg == nil then ctermfg = i - 1 end
+    vim.api.nvim_set_hl(0, color, { fg = fg, ctermfg = ctermfg, default = true })
+  end
+end
+create_terminal_hls()
+vim.api.nvim_create_autocmd("ColorScheme", {
+  group = vim.api.nvim_create_augroup("quicksys-set-hls", {}),
+  callback = function()
+    create_terminal_hls()
+  end,
+})
+
 -- local group = vim.api.nvim_create_augroup("quicksys.nvim", {})
 -- vim.api.nvim_create_autocmd("FileType", {
 --   desc = "replace native quickfix list",

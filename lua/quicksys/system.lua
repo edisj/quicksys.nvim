@@ -1,5 +1,7 @@
 local api, fn = vim.api, vim.fn
 local quickfix = require("quicksys.quickfix")
+local Parser = require("quicksys.ansi_parser")
+local util = require("quicksys.util")
 
 local M = { default_handlers = {} }
 
@@ -8,6 +10,45 @@ local scheduled_echo = vim.schedule_wrap(function(ctx, chunks)
   vim.list_extend(ctx.__msgchunks, chunks)
   ctx.__msgid = vim.api.nvim_echo(ctx.__msgchunks, false, { id = ctx.__msgid })
 end)
+
+local ns = api.nvim_create_namespace("")
+local win
+local scheduled_append = vim.schedule_wrap(function(ctx, chunks)
+  if ctx.__lines == nil then ctx.__lines = {} end
+  if ctx.__outbuf == nil then ctx.__outbuf = api.nvim_create_buf(false, true) end
+
+  local base = (#ctx.__lines > 0) and (#ctx.__lines - 1) or 0
+  local lines, extmarks = util.chunks_to_lines(chunks, base)
+
+  local start
+  if #ctx.__lines > 0 then
+    ctx.__lines[#ctx.__lines] = ctx.__lines[#ctx.__lines] .. table.remove(lines, 1)
+    start = #ctx.__lines - 1
+  else
+    start = 0
+  end
+  vim.list_extend(ctx.__lines, lines)
+  api.nvim_buf_set_lines(ctx.__outbuf, start, -1, false,
+                        vim.list_slice(ctx.__lines, start + 1))
+
+  for _, extmark in ipairs(extmarks) do
+    local srow, scol = extmark.row, extmark.start_col
+    extmark.row = nil
+    extmark.start_col = nil
+    api.nvim_buf_set_extmark(ctx.__outbuf, ns, srow, scol, {
+      end_col = extmark.end_col,
+      hl_group = extmark.hl_group,
+    })
+  end
+
+  if win and api.nvim_win_is_valid(win) then
+    api.nvim_win_set_buf(win, ctx.__outbuf)
+  else
+    win = api.nvim_open_win(ctx.__outbuf, false, { split = "below", win = -1, height = 15 })
+  end
+end)
+
+local which = scheduled_append
 
 M.system = function(...)
   if select("#", ...) == 0 then return end
@@ -87,7 +128,7 @@ function M._system(ctx, ...)
     ctx.__system_objs[ctx.__idx] = ret
     return ctx
   else
-    scheduled_echo(ctx, { { ret, "DiagnosticError" } })
+    which(ctx, { { ret, "DiagnosticError" } })
   end
 end
 
@@ -98,8 +139,9 @@ M.default_handlers.stdout = function(ctx, err, data)
   if err then return vim.notify(err) end
   if data == nil then return end
   data = data:gsub("\r\n", "\n")
-  local chunks = {{ data }}
-  scheduled_echo(ctx, chunks)
+  local chunks = Parser(data):parse()
+  if chunks == nil then chunks = {{ data }} end
+  which(ctx, chunks)
 end
 
 ---@param ctx quicksys.ContextObj
@@ -109,6 +151,10 @@ M.default_handlers.stderr = function(ctx, err, data)
   if err then return vim.notify(err) end
   if data == nil then return end
   data = data:gsub("\r\n", "\n")
+  local chunks = Parser(data):parse()
+  if chunks == nil then chunks = {{ data }} end
+  which(ctx, chunks)
+
   vim.schedule(function()
     local qf_context = vim.fn.getqflist({ context = true }).context
     -- NOTE: using __start_time as a unique id to tell if
@@ -134,25 +180,30 @@ end
 
 ---@param ctx quicksys.ContextObj
 M.default_handlers.before = function(ctx)
-  if ctx.__idx ~= 1 then return end
-
-  local timestamp = os.date("%a %d %H:%M:%S", vim.uv.gettimeofday())
-  local chunks = {
-    { "System" },
-    { "[", "@punctuation.bracket" },
-    { "]", "@punctuation.bracket" },
-    { " started at " },
-    { timestamp, "Comment" },
-  }
-  for i = #ctx.__cmds, 1, -1 do
-    local cmd = ctx.__cmds[i]
-    table.insert(chunks, 3, { cmd[1], "Function" })
-    if i > 1 then
-      table.insert(chunks, 3, { " ➔ " })
+  local chunks = {}
+  if ctx.__idx == 1 then
+    local timestamp = os.date("%a %d %H:%M:%S", vim.uv.gettimeofday())
+    local header = {
+      { "System" },
+      { "[", "@punctuation.bracket" },
+      { "]", "@punctuation.bracket" },
+      { " started at " },
+      { timestamp, "Comment" },
+    }
+    vim.list_extend(chunks, header)
+    for i = #ctx.__cmds, 1, -1 do
+      local cmd = ctx.__cmds[i]
+      table.insert(chunks, 3, { cmd[1], "Function" })
+      if i > 1 then
+        table.insert(chunks, 3, { " ➔ " })
+      end
     end
+    table.insert(chunks, { "\n" })
   end
-  table.insert(chunks, { "\n\n" })
-  scheduled_echo(ctx, chunks)
+
+  table.insert(chunks, { "\n" .. table.concat(ctx.__cmd, " ") .. "\n", "Comment" })
+
+  which(ctx, chunks)
 end
 
 ---@param ctx quicksys.ContextObj
@@ -161,42 +212,15 @@ M.default_handlers.after = function(ctx, result)
   if ctx.__idx ~= #ctx.__cmds and result.code == 0 then
     return
   end
-
   local elapsed_s = (ctx.__end_time - ctx.__start_time) / 1e9
   local time_formatted = elapsed_s < 1 and ("%.2fms"):format(elapsed_s * 1000) or ("%.2fs"):format(elapsed_s)
-
-  local chunks = ctx.__msgchunks and #ctx.__msgchunks > 0 and { { "\n" } } or {}
-  if #ctx.__cmds > 1 then
-    chunks[#chunks + 1] = { "[", "@punctuation.bracket" }
-    chunks[#chunks + 1] = { "]", "@punctuation.bracket" }
-  end
+  local chunks =  { { "\n" } }
   vim.list_extend(chunks, {
-    result.code == 0 and { " finished ", "DiagnosticOk" } or { " exited ", "DiagnosticError" },
+    result.code == 0 and { "finished ", "DiagnosticOk" } or { "exited ", "DiagnosticError" },
     { ("in %s with code " ):format(time_formatted) },
     { tostring(result.code), "Number" },
   })
-  for i = #ctx.__cmds, 1, -1 do
-    local cmd = ctx.__cmds[i]
-    local at = #ctx.__cmds > 1 and 3 or 2
-    if result.code == 0 then
-      table.insert(chunks, at, { cmd[1], "Function" })
-      if i > 1 then
-        table.insert(chunks, at, { " ✔ ", "DiagnosticOk" })
-      end
-    else
-      local is_before_error = i <= ctx.__idx
-      local is_after_error = i > ctx.__idx + 1
-      table.insert(chunks, at, { cmd[1], is_before_error and "Function" or "Comment"})
-      if i > 1 then
-        table.insert(chunks, at, {
-          is_after_error and " ➔ " or is_before_error and " ✔ " or " ✘ ",
-          is_after_error and "Comment" or is_before_error and "DiagnosticOk" or "DiagnosticError"
-        })
-      end
-    end
-  end
-
-  scheduled_echo(ctx, chunks)
+  which(ctx, chunks)
 end
 
 ---@alias quicksys.Command string | string[]

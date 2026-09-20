@@ -1,5 +1,5 @@
 return {
   name = "flat",
   handler = function(data) return data end,
-  qftf = require("quicksys.utils").gen_flat_qftf(),
+  qftf = require("quicksys.util").gen_flat_qftf(),
 }
