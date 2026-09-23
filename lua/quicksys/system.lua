@@ -1,7 +1,8 @@
-local api, fn = vim.api, vim.fn
-local quickfix = require("quicksys.quickfix")
+local api = vim.api
+local fn = vim.fn
+local uv = vim.uv
+local fs = vim.fs
 local AnsiParser = require("quicksys.ansi_parser")
-local util = require("quicksys.util")
 
 local M = { default_handlers = {} }
 local targets = {}
@@ -21,6 +22,13 @@ end
 ---@param ... quicksys.Command | quicksys.Command[] | quicksys.CommandSpec
 function M._system(ctx, ...)
   if ctx.__target == nil then ctx.__target = ctx.target or "quickfix" end
+  if ctx.__target == "loclist" and not ctx.__loclist_parent then
+    -- local curwin = api.nvim_get_current_win()
+    -- ctx.__loclist_parent = fn.getloclist(0, { winid = true }).winid == curwin and curwin
+    ctx.__loclist_parent = api.nvim_get_current_win()
+  end
+
+  ctx.__cwd = ctx.cwd or ctx.__cwd or fn.getcwd()
 
   local cmd
   local handlers = M.default_handlers
@@ -64,7 +72,7 @@ function M._system(ctx, ...)
 
   local rest_of_args = { select(2, ...) }
   local on_exit = function(result)
-    ctx.__end_time = vim.uv.hrtime()
+    ctx.__end_time = uv.hrtime()
     ctx.__end_times = ctx.__end_times or {}
     ctx.__end_times[#ctx.__end_times + 1] = ctx.__end_time
 
@@ -75,11 +83,11 @@ function M._system(ctx, ...)
     end
   end
 
-  ctx.__start_time = ctx.__start_time or vim.uv.hrtime()
+  ctx.__start_time = ctx.__start_time or uv.hrtime()
   ctx.__start_times = ctx.__start_times or {}
   ctx.__start_times[#ctx.__start_times + 1] = ctx.__start_time
   local ok, ret = pcall(vim.system, cmd, {
-    -- cwd = fn.getcwd(-1, -1, -1),
+    cwd = ctx.__cwd,
     text = true,
     stdout = function(...) handlers.stdout(ctx, ...) end,
     stderr = function(...) handlers.stderr(ctx, ...) end,
@@ -91,6 +99,9 @@ function M._system(ctx, ...)
     targets[ctx.__target](ctx, { { ret, "DiagnosticError" } })
   end
 end
+
+
+-- [default handlers] ---------------------------------------------------------
 
 ---@param ctx quicksys.ContextObj
 ---@param err any
@@ -119,7 +130,7 @@ end
 M.default_handlers.before = function(ctx)
   local chunks = {}
   if ctx.__idx == 1 then
-    local timestamp = os.date("%a %d %H:%M:%S", vim.uv.gettimeofday())
+    local timestamp = os.date("%a %d %H:%M:%S", uv.gettimeofday())
     local header = {
       { "System" },
       { "[", "@punctuation.bracket" },
@@ -161,9 +172,47 @@ M.default_handlers.after = function(ctx, result)
   targets[ctx.__target](ctx, chunks)
 end
 
+
+-- [targets] ------------------------------------------------------------------
+
+local chunks_to_lines = function(chunks, start)
+  local lines, extmarks = {}, {}
+  local start_col = 0
+  local offset = start or 0
+  local i = 1
+  local add_extmark = function(scol, ecol, hl)
+    extmarks[#extmarks + 1] = {
+      row = i - 1 + offset,
+      start_col = scol,
+      end_col = ecol,
+      hl_group = hl,
+    }
+  end
+
+  for _, chunk in ipairs(chunks) do
+    local text, hl = chunk[1], chunk[2]
+    local lines_in_chunk = vim.split(text, "\n")
+    -- local lines_in_chunk = text == "\n" and { "" } or vim.split(text, "\n")
+    local text_before_newline = lines_in_chunk[1]
+    lines[i] = (lines[i] or "") .. text_before_newline
+    if hl ~= nil then add_extmark(start_col, start_col + #text_before_newline, hl) end
+    start_col = start_col + #text_before_newline
+    for j = 2, #lines_in_chunk do
+      i = i + 1
+      start_col = 0
+      local line = lines_in_chunk[j]
+      lines[i] = (lines[i] or "") .. line
+      if hl ~= nil then add_extmark(start_col, start_col + #line, hl) end
+      start_col = start_col + #line
+    end
+  end
+
+  return lines, extmarks
+end
+
 local ns = api.nvim_create_namespace("")
 local send_chunks_to_list = function(list, ctx, chunks)
-  local lines, extmarks = util.chunks_to_lines(chunks)
+  local lines, extmarks = chunks_to_lines(chunks)
 
   local old_items = ctx.__items or {}
   local should_append_previous_items = #old_items > 1
@@ -176,9 +225,10 @@ local send_chunks_to_list = function(list, ctx, chunks)
 
   local item_maybe_set_location = function(item)
     for filename, lnum, col in item.text:gmatch("([^%s:]+):(%d+):?(%d*)") do
-      local stat = vim.uv.fs_stat(filename)
+      local path = filename:sub(1,1) == "/" and filename or fs.joinpath(ctx.__cwd, filename)
+      local stat = uv.fs_stat(path)
       if lnum and stat and stat.type == "file" then
-        item.filename = filename
+        item.filename = path
         item.lnum = tonumber(lnum)
         item.col = col ~= "" and tonumber(col) or 0
         item.valid = true
@@ -212,16 +262,14 @@ local send_chunks_to_list = function(list, ctx, chunks)
     quickfixtextfunc = function(info)
       local qfbufnr
       if info.quickfix == 1 then
-        qfbufnr = vim.fn.getqflist({ id = info.id, qfbufnr = 1 }).qfbufnr
+        qfbufnr = fn.getqflist({ id = info.id, qfbufnr = 1 }).qfbufnr
       else
-        qfbufnr = vim.fn.getloclist(info.winid, { id = info.id, qfbufnr = 1 }).qfbufnr
+        qfbufnr = fn.getloclist(info.winid, { id = info.id, qfbufnr = 1 }).qfbufnr
       end
 
       local _lines = vim
         .iter(ctx.__items)
-        :map(function(item)
-          return (item.text ~= "" and item.text) or " "
-        end)
+        :map(function(item) return (item.text ~= "" and item.text) or " " end)
         :totable()
 
       vim.schedule(function()
@@ -238,7 +286,7 @@ local send_chunks_to_list = function(list, ctx, chunks)
     end,
   }
 
-  local context = list == "loclist" and fn.getloclist(0, { context = true }).context
+  local context = list == "loclist" and fn.getloclist(ctx.__loclist_parent, { context = true }).context
                                      or fn.getqflist({ context = true }).context
   -- NOTE: using __start_time as a unique id to tell if
   -- current quickfix/loclist is the result of current context
@@ -252,16 +300,83 @@ local send_chunks_to_list = function(list, ctx, chunks)
   end
 end
 
+local get_win_config = function(ctx)
+  local pos = ctx.pos or ctx.__pos or "bot"
+  if pos == "bot" or pos == "top" then
+    local target = ctx.__target
+    local split = ({ bot = "below", top = "above" })[pos]
+    local max_height = math.floor(0.5 * vim.o.lines)
+    local height
+    if target == "loclist" or target == "quickfix" then
+      height = math.min(max_height, #ctx.__items)
+    else
+      assert(target == "buf")
+      height = math.min(max_height, api.nvim_buf_line_count(ctx.__target_buf))
+    end
+    return { split = split, win = -1, height = height }
+  elseif pos == "right" or pos == "left" then
+    local width = math.floor(0.5 * vim.o.columns)
+    return { split = pos, win = -1, width = width}
+  else
+    assert(pos == "float")
+    local width = math.floor(0.75 * vim.o.columns)
+    local height = math.floor(0.75 * vim.o.lines)
+    local row = math.floor(0.5 * ( vim.o.lines - height ))
+    local col = math.floor(0.5 * ( vim.o.columns - width ))
+    -- return { relative = "editor", row = row, col = col, width = width, height = height }
+    return { relative = "msgarea", height = 10 }
+  end
+end
+
 targets.quickfix = vim.schedule_wrap(function(ctx, chunks)
   send_chunks_to_list("quickfix", ctx, chunks)
-  vim.cmd("copen")
-  vim.cmd("wincmd p")
+
+  if not ctx.__quickfix_bufnr then
+    local qfbufnr = fn.getqflist({ qfbufnr = true }).qfbufnr
+    if qfbufnr == 0 then
+      vim._with({ noautocmd = true }, function()
+        vim.cmd.copen()
+        vim.cmd.close()
+      end)
+    end
+    ctx.__quickfix_bufnr = fn.getqflist({ qfbufnr = true }).qfbufnr
+  end
+
+  local winid = api.nvim_win_is_valid(ctx.__quickfix_winid or -1) and ctx.__quickfix_winid
+                                                                  or fn.getqflist({ winid = true }).winid
+  if winid == 0 then
+    vim.cmd("silent copen")
+    winid = fn.getqflist({ winid = true }).winid
+  end
+  ctx.__quickfix_winid = winid
+  api.nvim_win_set_config(ctx.__quickfix_winid, get_win_config(ctx))
 end)
 
 targets.loclist = vim.schedule_wrap(function(ctx, chunks)
   send_chunks_to_list("loclist", ctx, chunks)
-  vim.cmd("lopen")
-  vim.cmd("wincmd p")
+
+  if not ctx.__loclist_bufnr then
+    local qfbufnr = fn.getloclist(ctx.__loclist_parent, { qfbufnr = true }).qfbufnr
+    if qfbufnr == 0 then
+      vim._with({ noautocmd = true, win = ctx.__loclist_parent }, function()
+        vim.cmd.lopen()
+        vim.cmd.lclose()
+      end)
+    end
+    ctx.__loclist_bufnr = fn.getloclist(ctx.__loclist_parent, { qfbufnr = true }).qfbufnr
+  end
+
+  local winid = api.nvim_win_is_valid(ctx.__loclist_winid or -1) and ctx.__loclist_winid
+                                                                  or fn.getloclist(ctx.__loclist_parent, { winid = true }).winid
+  if winid == 0 then
+    -- vim._with({ noautocmd = true, win = ctx.__loclist_parent }, vim.cmd.lopen)
+    api.nvim_win_call(ctx.__loclist_parent, vim.cmd.lopen)
+    -- vim.cmd("lopen")
+    winid = fn.getloclist(ctx.__loclist_parent, { winid = true }).winid
+  end
+  ctx.__loclist_winid = winid
+  vim.wo[ctx.__loclist_winid].statusline = ""
+  api.nvim_win_set_config(ctx.__loclist_winid, get_win_config(ctx))
 end)
 
 targets.buf = vim.schedule_wrap(function(ctx, chunks)
@@ -289,7 +404,7 @@ targets.buf = vim.schedule_wrap(function(ctx, chunks)
   end
 
   local base = (#ctx.__lines > 0) and (#ctx.__lines - 1) or 0
-  local lines, extmarks = util.chunks_to_lines(chunks, base)
+  local lines, extmarks = chunks_to_lines(chunks, base)
 
   local start
   if #ctx.__lines > 0 then
@@ -315,8 +430,9 @@ targets.buf = vim.schedule_wrap(function(ctx, chunks)
   end
 
   if not (ctx.__target_win and api.nvim_win_is_valid(ctx.__target_win)) then
-    local pos = ctx.pos or ctx.__pos or "bot"
-    ctx.__target_win = api.nvim_open_win(ctx.__target_buf, false, { split = "below", win = -1 })
+    ctx.__target_win = api.nvim_open_win(ctx.__target_buf, false, get_win_config(ctx))
+  else
+    api.nvim_win_set_config(ctx.__target_win, get_win_config(ctx))
   end
 end)
 

@@ -2,6 +2,7 @@
 local CMD_OPTS = {
   target = { "quickfix", "loclist", "buf", "echo" },
   pos = { "left", "right", "top", "bot", "float" },
+  cwd = true,
 }
 
 local parse_args = function(args)
@@ -26,15 +27,15 @@ end, {
   desc = "TODO: system description",
   nargs = "+",
   complete = function(arglead)
-    -- local candidates = {}
-    -- local key = arglead:match("^(%w+)=")
-    -- if key and CMD_OPTS[key] then
-    --   for _, v in ipairs(CMD_OPTS[key]) do candidates[#candidates + 1] = key .. "=" .. v end
-    -- else
-    --   for k in pairs(CMD_OPTS) do candidates[#candidates + 1] = k .. "=" end
-    -- end
-    -- candidates = vim.tbl_filter(function(c) return c:find(arglead, 1, true) == 1 end, candidates)
-    -- if #candidates > 0 then return candidates end
+    local candidates = {}
+    local key = arglead:match("^(%w+)=")
+    if key and CMD_OPTS[key] then
+      for _, v in ipairs(CMD_OPTS[key]) do candidates[#candidates + 1] = key .. "=" .. v end
+    else
+      for k in pairs(CMD_OPTS) do candidates[#candidates + 1] = k .. "=" end
+    end
+    candidates = vim.tbl_filter(function(c) return c:find(arglead, 1, true) == 1 end, candidates)
+    if #candidates > 0 then return candidates end
     return vim.fn.getcompletion(arglead, "shellcmdline")
   end
 })
