@@ -1,11 +1,43 @@
-vim.api.nvim_create_user_command("System", function(args)
-    local split_on_delim = vim.split((args.args:gsub(" && ", ";")), ";", { trimempty = true })
-    local cmds = vim
-      .iter(split_on_delim)
-      :map(function(cmd) return vim.trim(cmd) end)
-      :totable()
-    require("quicksys").system(unpack(cmds))
-  end, { desc = "TODO: system description", nargs = "+", complete = "file" })
+
+local CMD_OPTS = {
+  target = { "quickfix", "loclist", "buf", "echo" },
+  pos = { "left", "right", "top", "bot", "float" },
+}
+
+local parse_args = function(args)
+  local opts = {}
+  while true do
+    local k, v, tail = args:match("^%s*(%w+)=(%S+)%s+(.*)$")
+    if not (k and CMD_OPTS[k]) then break end
+    opts[k] = v
+    args = tail
+  end
+  return opts, args
+end
+
+vim.api.nvim_create_user_command("System", function(opts)
+  local system_opts, args = parse_args(opts.args:gsub("%s+", " "))
+  local cmds = vim
+               .iter(vim.split(args, " && ", { trimempty = true }))
+               :map(function(cmd) return vim.trim(cmd) end)
+               :totable()
+  require("quicksys.system").system_with(system_opts, unpack(cmds))
+end, {
+  desc = "TODO: system description",
+  nargs = "+",
+  complete = function(arglead)
+    -- local candidates = {}
+    -- local key = arglead:match("^(%w+)=")
+    -- if key and CMD_OPTS[key] then
+    --   for _, v in ipairs(CMD_OPTS[key]) do candidates[#candidates + 1] = key .. "=" .. v end
+    -- else
+    --   for k in pairs(CMD_OPTS) do candidates[#candidates + 1] = k .. "=" end
+    -- end
+    -- candidates = vim.tbl_filter(function(c) return c:find(arglead, 1, true) == 1 end, candidates)
+    -- if #candidates > 0 then return candidates end
+    return vim.fn.getcompletion(arglead, "shellcmdline")
+  end
+})
 
 local function create_terminal_hls()
   for i, color in ipairs {
@@ -76,4 +108,4 @@ vim.api.nvim_create_autocmd("ColorScheme", {
 --       end)
 --     end)
 --   end
--- })
+-- )
