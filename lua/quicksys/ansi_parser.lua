@@ -77,7 +77,7 @@ function Parser:parse()
       elseif c == "3" or c == "9" then
         self.state = BEGIN_COLOR
       elseif c == ";" then
-        -- noop
+        -- no-op
       elseif c == "m" then
         self.state = NORMAL
       else
@@ -97,7 +97,7 @@ function Parser:parse()
       if c == "m" then
         self.state = NORMAL
       elseif c == ";" then
-        -- noop
+        -- no-op
       else
         return nil, "ERROR???"
       end

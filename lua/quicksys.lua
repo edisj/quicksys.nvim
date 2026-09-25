@@ -6,27 +6,12 @@ function M.system(...)
   return require("quicksys.system").system(...)
 end
 
----@param win_opts? table
-function M.quickfix_open(win_opts)
-  return require("quicksys.quickfix").open(win_opts)
+function M.system_with(opts, ...)
+  return require("quicksys.system").system_with(opts, ...)
 end
 
----whether the quickfix list window is open
----@return boolean
-function M.quickfix_is_open()
-  return require("quicksys.quickfix").is_open()
-end
-
----
----@param opts? table
-function M.quickfix_next(opts)
-  return require("quicksys.quickfix").next(opts)
-end
-
----
----@param opts? table
-function M.quickfix_prev(opts)
-  return require("quicksys.quickfix").prev(opts)
+function M.input(opts)
+  require("quicksys.system").input(opts)
 end
 
 return M

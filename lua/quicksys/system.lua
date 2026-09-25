@@ -7,15 +7,46 @@ local AnsiParser = require("quicksys.ansi_parser")
 local M = { default_handlers = {} }
 local targets = {}
 
+---@param ... quicksys.Command | quicksys.Command[] | quicksys.CommandSpec
 M.system = function(...)
   if select("#", ...) == 0 then return end
   return M._system({}, ...)
 end
 
+---@param opts table
+---@param ... quicksys.Command | quicksys.Command[] | quicksys.CommandSpec
 M.system_with = function(opts, ...)
   if select("#", ...) == 0 then return end
   local ctx = vim.tbl_deep_extend("force", {}, opts)
   return M._system(ctx, ...)
+end
+
+local last_cmd
+
+local input = function(opts, last)
+  local input_opts = {
+    prompt = "System: ",
+    scope = "project",
+    completion = "customlist,v:lua.require'quicksys.completion'.customlist",
+    default = last and last_cmd or nil,
+  }
+  local on_confirm = function(input)
+    vim.cmd("echohl None")
+    if input then
+      M.system_with(opts, input)
+      last_cmd = input
+    end
+  end
+  vim.cmd("echohl Question")
+  vim.ui.input(input_opts, on_confirm)
+end
+
+M.input = function(opts)
+  input(opts)
+end
+
+M.input_last = function(opts)
+  input(opts, true)
 end
 
 ---@param ctx quicksys.ContextObj
@@ -223,6 +254,9 @@ local send_chunks_to_list = function(list, ctx, chunks)
     ctx.__extmarks[#ctx.__extmarks + 1] = m
   end
 
+  ctx.__qf_predicate = ctx.qf_predicate
+                       or ctx.__qf_predicate
+                       or function(item) return item.filename ~= nil end
   local item_maybe_set_location = function(item)
     for filename, lnum, col in item.text:gmatch("([^%s:]+):(%d+):?(%d*)") do
       local path = filename:sub(1,1) == "/" and filename or fs.joinpath(ctx.__cwd, filename)
@@ -231,10 +265,11 @@ local send_chunks_to_list = function(list, ctx, chunks)
         item.filename = path
         item.lnum = tonumber(lnum)
         item.col = col ~= "" and tonumber(col) or 0
-        item.valid = true
-        return
+        break
       end
     end
+    item.valid = ctx.__qf_predicate(item)
+    return item
   end
 
   local new_items = vim
@@ -323,8 +358,7 @@ local get_win_config = function(ctx)
     local height = math.floor(0.75 * vim.o.lines)
     local row = math.floor(0.5 * ( vim.o.lines - height ))
     local col = math.floor(0.5 * ( vim.o.columns - width ))
-    -- return { relative = "editor", row = row, col = col, width = width, height = height }
-    return { relative = "msgarea", height = 10 }
+    return { relative = "editor", row = row, col = col, width = width, height = height }
   end
 end
 
@@ -342,13 +376,20 @@ targets.quickfix = vim.schedule_wrap(function(ctx, chunks)
     ctx.__quickfix_bufnr = fn.getqflist({ qfbufnr = true }).qfbufnr
   end
 
-  local winid = api.nvim_win_is_valid(ctx.__quickfix_winid or -1) and ctx.__quickfix_winid
-                                                                  or fn.getqflist({ winid = true }).winid
+  local winid
+  if api.nvim_win_is_valid(ctx.__quickfix_winid or -1) then
+    winid = ctx.__quickfix_winid
+  else
+    winid = fn.getqflist({ winid = true }).winid
+  end
   if winid == 0 then
     vim.cmd("silent copen")
+    vim.cmd("wincmd p")
     winid = fn.getqflist({ winid = true }).winid
   end
   ctx.__quickfix_winid = winid
+  vim.wo[ctx.__quickfix_winid].statusline = ""
+  -- if not ctx.__quicfix_bufnr then ctx.__quickfix_bufnr = fn.getqflist({ qfbufnr = true }).qfbufnr end
   api.nvim_win_set_config(ctx.__quickfix_winid, get_win_config(ctx))
 end)
 
@@ -366,16 +407,22 @@ targets.loclist = vim.schedule_wrap(function(ctx, chunks)
     ctx.__loclist_bufnr = fn.getloclist(ctx.__loclist_parent, { qfbufnr = true }).qfbufnr
   end
 
-  local winid = api.nvim_win_is_valid(ctx.__loclist_winid or -1) and ctx.__loclist_winid
-                                                                  or fn.getloclist(ctx.__loclist_parent, { winid = true }).winid
+  local winid
+  if api.nvim_win_is_valid(ctx.__loclist_winid or -1) then
+    winid = ctx.__loclist_winid
+  else
+    winid = fn.getloclist(ctx.__loclist_parent, { winid = true }).winid
+  end
   if winid == 0 then
-    -- vim._with({ noautocmd = true, win = ctx.__loclist_parent }, vim.cmd.lopen)
-    api.nvim_win_call(ctx.__loclist_parent, vim.cmd.lopen)
+    vim._with({ noautocmd = true, win = ctx.__loclist_parent }, vim.cmd.lopen)
+    -- api.nvim_win_call(ctx.__loclist_parent, vim.cmd.lopen)
     -- vim.cmd("lopen")
+    -- vim.cmd("wincmd p")
     winid = fn.getloclist(ctx.__loclist_parent, { winid = true }).winid
   end
   ctx.__loclist_winid = winid
   vim.wo[ctx.__loclist_winid].statusline = ""
+  -- if not ctx.__loclist_bufnr then ctx.__loclist_bufnr = fn.getloclist(ctx.__loclist_parent, { qfbufnr = true }).qfbufnr end
   api.nvim_win_set_config(ctx.__loclist_winid, get_win_config(ctx))
 end)
 
